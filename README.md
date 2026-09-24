@@ -20,7 +20,7 @@ Sistem pencatatan kehadiran pegawai berbasis web dengan fitur autentikasi, CRUD 
 
 ---
 
-## 🖼️ Tampilan Antarmuka
+## 🖼️ Interface
 
 ![Dashboard Absensi](docs/attendance-system%20dashboard.png)
 
