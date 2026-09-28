@@ -70,7 +70,7 @@ class EmployeeController extends Controller
             'join_date'     => ['required', 'date'],
             'status'        => ['required', 'in:active,inactive'],
             'password'      => ['required', 'string', 'min:8', 'confirmed'],
-            'photo'         => ['nullable', 'image', 'max:2048'],
+            'photo'         => ['nullable', 'image', 'mimes:jpeg,png,jpg,webp', 'max:2048'],
         ]);
 
         DB::transaction(function () use ($request) {
@@ -148,7 +148,7 @@ class EmployeeController extends Controller
             'address'       => ['nullable', 'string'],
             'join_date'     => ['required', 'date'],
             'status'        => ['required', 'in:active,inactive'],
-            'photo'         => ['nullable', 'image', 'max:2048'],
+            'photo'         => ['nullable', 'image', 'mimes:jpeg,png,jpg,webp', 'max:2048'],
         ]);
 
         DB::transaction(function () use ($request, $employee) {

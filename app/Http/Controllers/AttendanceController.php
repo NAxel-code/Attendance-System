@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Models\Attendance;
 use App\Models\Department;
 use App\Models\Employee;
+use Illuminate\Database\QueryException;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 
@@ -45,20 +46,23 @@ class AttendanceController extends Controller
     }
 
     /**
-     * Form tambah absensi (admin).
+     * Form tambah absensi (khusus admin).
      */
     public function create()
     {
+        abort_if(! Auth::user()->isAdmin(), 403, 'Akses ditolak: Hanya untuk administrator.');
+
         $employees = Employee::where('status', 'active')->orderBy('name')->get();
         return view('attendances.create', compact('employees'));
     }
 
     /**
-     * Simpan absensi baru.
+     * Simpan absensi baru (khusus admin).
      */
     public function store(Request $request)
     {
         $user = Auth::user();
+        abort_if(! $user->isAdmin(), 403, 'Akses ditolak: Hanya untuk administrator.');
 
         $request->validate([
             'employee_id' => ['required', 'exists:employees,id'],
@@ -78,15 +82,19 @@ class AttendanceController extends Controller
             return back()->withErrors(['date' => 'Absensi untuk pegawai ini pada tanggal tersebut sudah ada.']);
         }
 
-        Attendance::create([
-            'employee_id' => $request->employee_id,
-            'date'        => $request->date,
-            'check_in'    => $request->check_in,
-            'check_out'   => $request->check_out,
-            'status'      => $request->status,
-            'notes'       => $request->notes,
-            'approved_by' => $user->isAdmin() ? $user->id : null,
-        ]);
+        try {
+            Attendance::create([
+                'employee_id' => $request->employee_id,
+                'date'        => $request->date,
+                'check_in'    => $request->check_in,
+                'check_out'   => $request->check_out,
+                'status'      => $request->status,
+                'notes'       => $request->notes,
+                'approved_by' => $user->id,
+            ]);
+        } catch (QueryException $e) {
+            return back()->withErrors(['date' => 'Data absensi untuk pegawai pada tanggal tersebut sudah tercatat.']);
+        }
 
         return redirect()->route('attendances.index')
                          ->with('success', 'Absensi berhasil dicatat.');
@@ -98,24 +106,29 @@ class AttendanceController extends Controller
     public function show(Attendance $attendance)
     {
         $this->authorizeAccess($attendance);
+
         $attendance->load('employee.department', 'approvedBy');
         return view('attendances.show', compact('attendance'));
     }
 
     /**
-     * Form edit absensi (admin only).
+     * Form edit absensi (khusus admin).
      */
     public function edit(Attendance $attendance)
     {
+        abort_if(! Auth::user()->isAdmin(), 403, 'Akses ditolak: Hanya untuk administrator.');
+
         $employees = Employee::where('status', 'active')->orderBy('name')->get();
         return view('attendances.edit', compact('attendance', 'employees'));
     }
 
     /**
-     * Update absensi.
+     * Update absensi (khusus admin).
      */
     public function update(Request $request, Attendance $attendance)
     {
+        abort_if(! Auth::user()->isAdmin(), 403, 'Akses ditolak: Hanya untuk administrator.');
+
         $request->validate([
             'date'      => ['required', 'date'],
             'check_in'  => ['nullable', 'date_format:H:i'],
@@ -138,10 +151,12 @@ class AttendanceController extends Controller
     }
 
     /**
-     * Hapus absensi.
+     * Hapus absensi (khusus admin).
      */
     public function destroy(Attendance $attendance)
     {
+        abort_if(! Auth::user()->isAdmin(), 403, 'Akses ditolak: Hanya untuk administrator.');
+
         $attendance->delete();
 
         return redirect()->route('attendances.index')
@@ -149,7 +164,7 @@ class AttendanceController extends Controller
     }
 
     /**
-     * Check-in mandiri oleh pegawai.
+     * Check-in mandiri oleh pegawai aktif.
      */
     public function checkIn(Request $request)
     {
@@ -158,6 +173,11 @@ class AttendanceController extends Controller
 
         if (! $employee) {
             return back()->with('error', 'Data pegawai tidak ditemukan.');
+        }
+
+        // Validasi status pegawai aktif
+        if ($employee->status !== 'active') {
+            return back()->with('error', 'Akun pegawai Anda berstatus nonaktif. Anda tidak dapat melakukan absensi.');
         }
 
         // Cek sudah check-in hari ini?
@@ -175,23 +195,37 @@ class AttendanceController extends Controller
                        ? 'late'
                        : 'present';
 
-        Attendance::create([
-            'employee_id' => $employee->id,
-            'date'        => today(),
-            'check_in'    => $checkInTime->format('H:i'),
-            'status'      => $status,
-        ]);
+        try {
+            Attendance::create([
+                'employee_id' => $employee->id,
+                'date'        => today(),
+                'check_in'    => $checkInTime->format('H:i'),
+                'status'      => $status,
+            ]);
+        } catch (QueryException $e) {
+            // Mencegah crash jika terjadi double-click (race condition)
+            return back()->with('error', 'Anda sudah melakukan check-in hari ini.');
+        }
 
         return back()->with('success', 'Check-in berhasil pada ' . $checkInTime->format('H:i') . '.');
     }
 
     /**
-     * Check-out mandiri oleh pegawai.
+     * Check-out mandiri oleh pegawai aktif.
      */
     public function checkOut(Request $request)
     {
         $user     = Auth::user();
         $employee = $user->employee;
+
+        if (! $employee) {
+            return back()->with('error', 'Data pegawai tidak ditemukan.');
+        }
+
+        // Validasi status pegawai aktif
+        if ($employee->status !== 'active') {
+            return back()->with('error', 'Akun pegawai Anda berstatus nonaktif. Anda tidak dapat melakukan absensi.');
+        }
 
         $today = Attendance::where('employee_id', $employee->id)
                             ->whereDate('date', today())
@@ -211,13 +245,13 @@ class AttendanceController extends Controller
     }
 
     /**
-     * Pastikan pegawai hanya akses absensinya sendiri.
+     * Pastikan pegawai hanya dapat mengakses absensinya sendiri.
      */
     private function authorizeAccess(Attendance $attendance): void
     {
         $user = Auth::user();
         if (! $user->isAdmin() && $attendance->employee_id !== $user->employee?->id) {
-            abort(403);
+            abort(403, 'Akses ditolak: Anda tidak memiliki akses ke data absensi ini.');
         }
     }
 }
