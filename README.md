@@ -147,7 +147,12 @@ php artisan migrate --seed
 php artisan storage:link
 ```
 
-### 6. Jalankan Server Lokal
+### 6. Jalankan Pengujian (Automated Feature Tests)
+```bash
+php artisan test
+```
+
+### 7. Jalankan Server Lokal
 ```bash
 php artisan serve
 ```
